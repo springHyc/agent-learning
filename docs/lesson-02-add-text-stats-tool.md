@@ -102,6 +102,304 @@ return {
 
 这一步模拟真实 LLM 的 tool calling。真实 LLM 以后也会做同样的事情：根据用户输入和工具描述，决定是否调用某个工具，并生成参数。
 
+## `decide` 方法详解
+
+位置：`src/ruleBasedModel.ts`
+
+`decide` 可以理解成 Agent 的“决策函数”。
+
+它不负责执行工具，只负责回答一个问题：
+
+```text
+根据当前上下文和可用工具，下一步应该直接回答，还是调用某个工具？
+```
+
+方法签名：
+
+```ts
+async decide(messages: Message[], tools: Tool[]): Promise<ModelDecision>
+```
+
+它接收两个参数：
+
+### 1. `messages`
+
+`messages` 表示当前对话上下文。
+
+一开始，用户输入会被放进去：
+
+```ts
+[
+  { role: "user", content: "帮我计算 12 + 30" }
+]
+```
+
+工具执行后，Agent 会把工具结果也放进去：
+
+```ts
+[
+  { role: "user", content: "帮我计算 12 + 30" },
+  { role: "tool", toolName: "calculator", content: "42" }
+]
+```
+
+`RuleBasedModel` 目前只看最后一条消息：
+
+```ts
+const lastMessage = getLastMessage(messages);
+```
+
+真实 LLM 通常会看完整 `messages`，包括 system、user、assistant、tool 等多种消息。
+
+### 2. `tools`
+
+`tools` 表示当前 Agent 能用哪些工具。
+
+例如：
+
+```ts
+[calculatorTool, currentTimeTool, textStatsTool]
+```
+
+`decide` 不应该凭空调用一个不存在的工具，所以每次返回工具调用前都会检查：
+
+```ts
+hasTool(tools, "calculator")
+```
+
+这也是 Agent 工程里的一个重要边界：模型可以提出工具调用，但程序要验证这个工具是否真实存在、是否允许调用。
+
+### 3. 返回值：`ModelDecision`
+
+`decide` 的返回值只有两种。
+
+第一种是最终回答：
+
+```ts
+{
+  type: "final",
+  content: "..."
+}
+```
+
+表示：不需要再调用工具了，可以直接回答用户。
+
+第二种是工具调用：
+
+```ts
+{
+  type: "tool_call",
+  toolName: "calculator",
+  args: { a: 12, b: 30, operation: "add" }
+}
+```
+
+表示：下一步要调用某个工具，并传入这些参数。
+
+注意：`decide` 只是“提出调用”，并不真的执行工具。真正执行工具的是 `Agent.run()`。
+
+### 4. 第一段逻辑：看到工具结果后生成最终回答
+
+```ts
+if (lastMessage.role === "tool") {
+  return {
+    type: "final",
+    content: `工具 ${lastMessage.toolName} 的执行结果是：${lastMessage.content}`,
+  };
+}
+```
+
+这段逻辑的意思是：
+
+```text
+如果最后一条消息是工具返回结果，说明工具已经执行完。
+现在可以基于工具观察结果生成最终回答。
+```
+
+以 `帮我计算 12 + 30` 为例：
+
+```text
+第一轮 decide：我要调用 calculator
+Agent.run 执行 calculator
+工具返回 42
+Agent.run 把 42 作为 tool message 放回 messages
+第二轮 decide：看到 tool message，生成最终回答
+```
+
+这就是 Agent 里的 observation，也就是“观察”。
+
+### 5. 第二段逻辑：识别数学问题
+
+```ts
+const math = parseMathExpression(lastMessage.content);
+if (math && hasTool(tools, "calculator")) {
+  return {
+    type: "tool_call",
+    toolName: "calculator",
+    args: math,
+  };
+}
+```
+
+如果用户输入：
+
+```text
+帮我计算 12 + 30
+```
+
+`parseMathExpression` 会解析出：
+
+```ts
+{ a: 12, b: 30, operation: "add" }
+```
+
+于是 `decide` 返回：
+
+```ts
+{
+  type: "tool_call",
+  toolName: "calculator",
+  args: { a: 12, b: 30, operation: "add" }
+}
+```
+
+此时 `decide` 的工作结束。后面由 `Agent.run()` 找到 `calculator` 工具并执行。
+
+### 6. 第三段逻辑：识别文本统计问题
+
+```ts
+const textStats = parseTextStatsRequest(lastMessage.content);
+if (textStats && hasTool(tools, "text_stats")) {
+  return {
+    type: "tool_call",
+    toolName: "text_stats",
+    args: textStats,
+  };
+}
+```
+
+如果用户输入：
+
+```text
+请统计文本：hello world
+```
+
+`parseTextStatsRequest` 会解析出：
+
+```ts
+{ text: "hello world" }
+```
+
+于是 `decide` 返回：
+
+```ts
+{
+  type: "tool_call",
+  toolName: "text_stats",
+  args: { text: "hello world" }
+}
+```
+
+这一步模拟真实 LLM 的 tool calling 行为：根据用户需求选择工具，并生成工具参数。
+
+### 7. 第四段逻辑：识别时间问题
+
+```ts
+if (/几点|时间|日期|现在/.test(lastMessage.content) && hasTool(tools, "current_time")) {
+  return {
+    type: "tool_call",
+    toolName: "current_time",
+    args: {},
+  };
+}
+```
+
+如果用户输入：
+
+```text
+现在几点
+```
+
+`decide` 会返回：
+
+```ts
+{
+  type: "tool_call",
+  toolName: "current_time",
+  args: {}
+}
+```
+
+`current_time` 不需要参数，所以 `args` 是空对象。
+
+### 8. 兜底逻辑：直接回答
+
+```ts
+return {
+  type: "final",
+  content:
+    "这是一个教学用的最小 Agent。我现在会计算简单表达式、查询当前时间，也会统计文本。",
+};
+```
+
+如果输入既不是数学问题，也不是文本统计，也不是时间问题，就直接回答。
+
+例如：
+
+```text
+你好
+```
+
+这时没有必要调用工具，直接返回 `final`。
+
+### 9. 用伪代码理解 `decide`
+
+完整逻辑可以简化成：
+
+```text
+拿到最后一条消息
+
+如果最后一条是工具返回结果：
+  生成最终回答
+
+否则如果像数学问题，并且有 calculator 工具：
+  返回 calculator 工具调用
+
+否则如果像文本统计问题，并且有 text_stats 工具：
+  返回 text_stats 工具调用
+
+否则如果像时间问题，并且有 current_time 工具：
+  返回 current_time 工具调用
+
+否则：
+  直接回答
+```
+
+### 10. `decide` 和 `Agent.run()` 的关系
+
+`decide` 是“大脑决策”，`Agent.run()` 是“执行循环”。
+
+关系可以这样理解：
+
+```text
+decide：我想调用 calculator，参数是 12 和 30
+Agent.run：好，我去找到 calculator 并执行
+calculator：结果是 42
+Agent.run：把 42 放回 messages
+decide：看到工具结果后，生成最终回答
+```
+
+后续接 DeepSeek 时，`RuleBasedModel.decide` 会变成 `DeepSeekModel.decide`。
+
+区别是：
+
+```text
+现在：用规则判断下一步
+以后：用真实 LLM 判断下一步
+```
+
+但它们都必须返回同一种 `ModelDecision`。这就是我们先抽象 `Model` 接口的原因。
+
 ### 4. 补测试
 
 位置：`tests/agent.test.ts`
