@@ -1,9 +1,31 @@
 import { Agent } from "./agent.js";
+import { DeepSeekModel } from "./deepSeekModel.js";
+import { loadEnvFile } from "./env.js";
 import { RuleBasedModel } from "./ruleBasedModel.js";
 import { tools } from "./tools.js";
+import type { Model } from "./types.js";
+
+loadEnvFile();
+
+function createModel(): Model {
+  const provider = process.env.MODEL_PROVIDER ?? "mock";
+
+  switch (provider) {
+    case "mock":
+      return new RuleBasedModel();
+    case "deepseek":
+      return new DeepSeekModel({
+        apiKey: process.env.DEEPSEEK_API_KEY ?? "",
+        model: process.env.DEEPSEEK_MODEL,
+        baseUrl: process.env.DEEPSEEK_BASE_URL,
+      });
+    default:
+      throw new Error(`不支持的 MODEL_PROVIDER：${provider}`);
+  }
+}
 
 const input = process.argv.slice(2).join(" ") || "帮我计算 12 + 30";
-const agent = new Agent(new RuleBasedModel(), tools);
+const agent = new Agent(createModel(), tools);
 const result = await agent.run(input);
 
 console.log("用户输入：");

@@ -29,6 +29,26 @@ function countWords(text: string): number {
 export const calculatorTool: Tool = {
   name: "calculator",
   description: "执行两个数字之间的基础四则运算",
+  parameters: {
+    type: "object",
+    properties: {
+      a: {
+        type: "number",
+        description: "参与运算的第一个数字",
+      },
+      b: {
+        type: "number",
+        description: "参与运算的第二个数字",
+      },
+      operation: {
+        type: "string",
+        description: "要执行的运算类型",
+        enum: ["add", "subtract", "multiply", "divide"],
+      },
+    },
+    required: ["a", "b", "operation"],
+    additionalProperties: false,
+  },
   execute(args) {
     const a = getNumber(args, "a");
     const b = getNumber(args, "b");
@@ -55,6 +75,17 @@ export const calculatorTool: Tool = {
 export const textStatsTool: Tool = {
   name: "text_stats",
   description: "统计文本的字符数、非空白字符数和词数",
+  parameters: {
+    type: "object",
+    properties: {
+      text: {
+        type: "string",
+        description: "需要统计的原始文本",
+      },
+    },
+    required: ["text"],
+    additionalProperties: false,
+  },
   execute(args) {
     const text = getString(args, "text");
     const characters = Array.from(text).length;
@@ -73,6 +104,12 @@ export const textStatsTool: Tool = {
 export const currentTimeTool: Tool = {
   name: "current_time",
   description: "获取当前本地时间",
+  parameters: {
+    type: "object",
+    properties: {},
+    required: [],
+    additionalProperties: false,
+  },
   execute() {
     return new Date().toLocaleString("zh-CN", {
       timeZone: "Asia/Shanghai",

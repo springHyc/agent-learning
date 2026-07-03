@@ -25,6 +25,21 @@ npm run dev -- "帮我计算 12 + 30"
 npm run dev -- "现在几点"
 ```
 
+默认使用本地 mock 模型。要体验 DeepSeek 真实模型，先配置 `.env`：
+
+```bash
+MODEL_PROVIDER=deepseek
+DEEPSEEK_API_KEY=你的 DeepSeek API Key
+DEEPSEEK_MODEL=deepseek-v4-flash
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+```
+
+然后运行：
+
+```bash
+npm run dev
+```
+
 ## 验证
 
 ```bash
@@ -35,7 +50,7 @@ npm test
 
 - [第 1 课：最小 Agent 循环](./docs/lesson-01-minimal-agent-loop.md)
 - [第 2 课：新增 text_stats 工具](./docs/lesson-02-add-text-stats-tool.md)
-- 第 3 课：真实 LLM API 与 tool calling
+- [第 3 课：接入 DeepSeek 真实 Tool Calling](./docs/lesson-03-deepseek-tool-calling.md)
 - 第 4 课：多工具与参数校验
 - 第 5 课：RAG 知识库
 - 第 6 课：浏览器自动化 Agent

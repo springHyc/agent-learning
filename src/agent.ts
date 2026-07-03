@@ -1,6 +1,10 @@
 import type { AgentResult, AgentStep, Message, Model, Tool } from "./types.js";
 
 export class Agent {
+  private nextLocalToolCallId(stepIndex: number): string {
+    return `local_call_${stepIndex + 1}`;
+  }
+
   constructor(
     private readonly model: Model,
     private readonly tools: Tool[],
@@ -31,12 +35,25 @@ export class Agent {
         throw new Error(`工具不存在：${decision.toolName}`);
       }
 
+      const toolCallId = decision.toolCallId ?? this.nextLocalToolCallId(stepIndex);
       const currentStep: AgentStep = {
         thought: `模型决定调用工具 ${decision.toolName}`,
         action: "tool_call",
         toolName: decision.toolName,
         args: decision.args,
       };
+
+      messages.push({
+        role: "assistant",
+        content: "",
+        toolCalls: [
+          {
+            id: toolCallId,
+            toolName: decision.toolName,
+            args: decision.args,
+          },
+        ],
+      });
 
       try {
         const observation = await tool.execute(decision.args);
@@ -45,6 +62,7 @@ export class Agent {
         messages.push({
           role: "tool",
           toolName: decision.toolName,
+          toolCallId,
           content: observation,
         });
       } catch (error) {
@@ -54,6 +72,7 @@ export class Agent {
         messages.push({
           role: "tool",
           toolName: decision.toolName,
+          toolCallId,
           content: currentStep.observation,
         });
       }
