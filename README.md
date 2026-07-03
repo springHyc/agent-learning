@@ -51,6 +51,6 @@ npm test
 - [第 1 课：最小 Agent 循环](./docs/lesson-01-minimal-agent-loop.md)
 - [第 2 课：新增 text_stats 工具](./docs/lesson-02-add-text-stats-tool.md)
 - [第 3 课：接入 DeepSeek 真实 Tool Calling](./docs/lesson-03-deepseek-tool-calling.md)
-- 第 4 课：多工具与参数校验
+- [第 4 课：工具参数校验与错误恢复](./docs/lesson-04-tool-validation-recovery.md)
 - 第 5 课：RAG 知识库
 - 第 6 课：浏览器自动化 Agent

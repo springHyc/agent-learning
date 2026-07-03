@@ -1,4 +1,10 @@
-import type { Message, Model, ModelDecision, RecordedToolCall, Tool } from "./types.js";
+import type {
+  Message,
+  Model,
+  ModelDecision,
+  RecordedToolCall,
+  Tool,
+} from "./types.js";
 
 type DeepSeekModelOptions = {
   apiKey: string;
@@ -42,11 +48,44 @@ type DeepSeekChatResponse = {
   }>;
 };
 
+const debugColors = {
+  blue: "\x1b[34m",
+  cyan: "\x1b[36m",
+  green: "\x1b[32m",
+  yellow: "\x1b[33m",
+  reset: "\x1b[0m",
+} as const;
+
+function isDebugEnabled(): boolean {
+  return process.env.AGENT_DEBUG === "1";
+}
+
+function debugLog(
+  title: string,
+  value?: unknown,
+  color: string = debugColors.cyan,
+): void {
+  if (!isDebugEnabled()) {
+    return;
+  }
+
+  console.log(`${color}[DeepSeekModel] ${title}${debugColors.reset}`);
+  if (value !== undefined) {
+    console.dir(value, {
+      depth: null,
+      colors: true,
+    });
+  }
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function parseJsonObject(value: string, context: string): Record<string, unknown> {
+function parseJsonObject(
+  value: string,
+  context: string,
+): Record<string, unknown> {
   const parsed = JSON.parse(value) as unknown;
 
   if (!isRecord(parsed)) {
@@ -65,7 +104,9 @@ function parseToolArguments(argumentsText: string): Record<string, unknown> {
   }
 }
 
-function getFirstAssistantMessage(response: DeepSeekChatResponse): NonNullable<
+function getFirstAssistantMessage(
+  response: DeepSeekChatResponse,
+): NonNullable<
   NonNullable<DeepSeekChatResponse["choices"]>[number]["message"]
 > {
   const message = response.choices?.[0]?.message;
@@ -113,7 +154,10 @@ export class DeepSeekModel implements Model {
 
     this.apiKey = options.apiKey;
     this.model = options.model ?? "deepseek-v4-flash";
-    this.baseUrl = (options.baseUrl ?? "https://api.deepseek.com").replace(/\/+$/, "");
+    this.baseUrl = (options.baseUrl ?? "https://api.deepseek.com").replace(
+      /\/+$/,
+      "",
+    );
     this.systemPrompt =
       options.systemPrompt ??
       "你是一个教学用 Agent。需要工具时只发起工具调用；拿到工具结果后，用简洁中文回答用户。";
@@ -121,33 +165,42 @@ export class DeepSeekModel implements Model {
   }
 
   async decide(messages: Message[], tools: Tool[]): Promise<ModelDecision> {
+    const requestBody = {
+      model: this.model,
+      messages: this.toDeepSeekMessages(messages),
+      tools: tools.map(toDeepSeekTool),
+      tool_choice: "auto",
+      thinking: { type: "disabled" },
+      temperature: 0,
+      stream: false,
+    };
+
+    debugLog("request messages", requestBody.messages, debugColors.blue);
+
     const response = await this.fetchImpl(`${this.baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${this.apiKey}`,
       },
-      body: JSON.stringify({
-        model: this.model,
-        messages: this.toDeepSeekMessages(messages),
-        tools: tools.map(toDeepSeekTool),
-        tool_choice: "auto",
-        thinking: { type: "disabled" },
-        temperature: 0,
-        stream: false,
-      }),
+      body: JSON.stringify(requestBody),
     });
 
     const responseText = await response.text();
     if (!response.ok) {
-      throw new Error(`DeepSeek API 请求失败 (${response.status}): ${responseText}`);
+      throw new Error(
+        `DeepSeek API 请求失败 (${response.status}): ${responseText}`,
+      );
     }
 
     const responseJson = JSON.parse(responseText) as DeepSeekChatResponse;
+    debugLog("raw response", responseJson, debugColors.yellow);
     const assistantMessage = getFirstAssistantMessage(responseJson);
     const toolCall = assistantMessage.tool_calls?.[0];
 
     if (toolCall) {
+      debugLog("selected tool call", toolCall, debugColors.green);
+
       return {
         type: "tool_call",
         toolName: toolCall.function.name,
@@ -155,6 +208,8 @@ export class DeepSeekModel implements Model {
         toolCallId: toolCall.id,
       };
     }
+
+    debugLog("final answer", assistantMessage.content, debugColors.green);
 
     return {
       type: "final",
